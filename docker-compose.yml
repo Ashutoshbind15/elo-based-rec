@@ -1,0 +1,12 @@
+services:
+  lc0-api:
+    build:
+      context: .
+      args:
+        MAIA_LEVEL: ${MAIA_LEVEL:-1100}
+    environment:
+      PORT: 8787
+      LC0_NODES: ${LC0_NODES:-1}
+      LC0_TIMEOUT_MS: ${LC0_TIMEOUT_MS:-30000}
+    ports:
+      - "${PORT:-8787}:8787"

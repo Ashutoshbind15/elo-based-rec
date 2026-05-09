@@ -1,0 +1,19 @@
+{
+  "name": "lc0-comm",
+  "version": "1.0.0",
+  "description": "HTTP API wrapper for lc0/maia best move",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.33.2",
+  "dependencies": {
+    "dotenv": "17.4.2",
+    "express": "5.2.1"
+  }
+}
