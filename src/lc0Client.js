@@ -1,82 +1,106 @@
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-function expandHomePath(input) {
-  if (!input || typeof input !== "string") return input;
-  if (input === "~") return os.homedir();
-  if (input.startsWith(`~${path.sep}`)) {
-    return path.join(os.homedir(), input.slice(2));
+const DEFAULT_MAIA_LEVELS = Object.freeze(
+  Array.from({ length: 9 }, (_, index) => 1100 + index * 100)
+);
+const DEFAULT_BINARY_PATH = "/opt/lc0/bin/lc0";
+const DEFAULT_CWD = "/opt/lc0";
+const DEFAULT_WEIGHTS_DIR = "/opt/lc0/weights";
+
+function validatePositiveInteger(name, value) {
+  const parsedValue = Number(value);
+  if (!Number.isInteger(parsedValue) || parsedValue < 1) {
+    throw new Error(`${name} must be a positive integer`);
   }
-  return input;
+  return parsedValue;
 }
 
-function resolveDefaultCwd(binaryPath) {
-  const expandedBinary = expandHomePath(binaryPath);
-  if (!expandedBinary || expandedBinary === "lc0") {
-    return process.cwd();
-  }
-  if (expandedBinary.includes(path.sep)) {
-    return path.dirname(path.resolve(expandedBinary));
-  }
-  return process.cwd();
-}
+function normalizeLevel(level, options = {}) {
+  const allowedLevels = options.allowedLevels || DEFAULT_MAIA_LEVELS;
+  const fallbackLevel =
+    options.defaultLevel != null ? Number(options.defaultLevel) : allowedLevels[0];
 
-function detectWeightsFile(searchDir) {
-  try {
-    const files = fs.readdirSync(searchDir);
-    const candidates = files.filter(
-      (file) => file.endsWith(".pb.gz") || file.endsWith(".pb")
+  if (level == null || level === "") {
+    return fallbackLevel;
+  }
+
+  const parsedLevel = Number(level);
+  if (!Number.isInteger(parsedLevel)) {
+    const error = new Error("`level` must be an integer rating");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!allowedLevels.includes(parsedLevel)) {
+    const error = new Error(
+      `Unsupported level ${parsedLevel}. Supported levels: ${allowedLevels.join(", ")}`
     );
-    if (candidates.length === 0) {
-      return null;
-    }
-
-    const maiaFirst = [...candidates].sort((a, b) => {
-      const aScore = a.toLowerCase().includes("maia") ? 0 : 1;
-      const bScore = b.toLowerCase().includes("maia") ? 0 : 1;
-      if (aScore !== bScore) return aScore - bScore;
-      return a.localeCompare(b);
-    });
-
-    return path.join(searchDir, maiaFirst[0]);
-  } catch {
-    return null;
+    error.statusCode = 400;
+    throw error;
   }
+
+  return parsedLevel;
+}
+
+function resolveWeightsPath(weightsDir, level) {
+  return path.join(weightsDir, `maia-${level}.pb.gz`);
 }
 
 function buildLc0Config(options = {}) {
-  const rawBinaryPath = options.binaryPath || process.env.LC0_BINARY || "lc0";
-  const expandedBinaryPath = expandHomePath(rawBinaryPath);
+  const levels = options.levels || DEFAULT_MAIA_LEVELS;
+  const defaultLevel = normalizeLevel(
+    options.defaultLevel ?? process.env.MAIA_DEFAULT_LEVEL,
+    {
+      allowedLevels: levels,
+      defaultLevel: levels[0],
+    }
+  );
+  const weightsDir = options.weightsDir || DEFAULT_WEIGHTS_DIR;
 
-  const cwdBase =
-    expandHomePath(options.cwd || process.env.LC0_CWD) ||
-    resolveDefaultCwd(expandedBinaryPath);
-  const cwd = path.resolve(cwdBase);
+  const weightsByLevel = {};
+  const missingLevels = [];
 
-  const binaryPath = expandedBinaryPath.includes(path.sep)
-    ? path.resolve(cwd, expandedBinaryPath)
-    : expandedBinaryPath;
+  for (const level of levels) {
+    const weightsPath = resolveWeightsPath(weightsDir, level);
+    weightsByLevel[level] = weightsPath;
+    if (!fs.existsSync(weightsPath)) {
+      missingLevels.push(level);
+    }
+  }
 
-  const rawWeightsPath =
-    options.weightsPath || process.env.LC0_WEIGHTS || detectWeightsFile(cwd);
-  const expandedWeightsPath = expandHomePath(rawWeightsPath);
+  if (missingLevels.length > 0) {
+    throw new Error(
+      `Missing Maia weights for levels: ${missingLevels.join(", ")} in ${weightsDir}`
+    );
+  }
 
   return {
-    binaryPath,
-    cwd,
-    nodes: Number(options.nodes || process.env.LC0_NODES || 1),
-    timeoutMs: Number(options.timeoutMs || process.env.LC0_TIMEOUT_MS || 30000),
-    weightsPath: expandedWeightsPath
-      ? path.resolve(cwd, expandedWeightsPath)
-      : null,
+    binaryPath: options.binaryPath || DEFAULT_BINARY_PATH,
+    cwd: options.cwd || DEFAULT_CWD,
+    nodes: validatePositiveInteger(
+      "LC0_NODES",
+      options.nodes ?? process.env.LC0_NODES ?? 1
+    ),
+    timeoutMs: validatePositiveInteger(
+      "LC0_TIMEOUT_MS",
+      options.timeoutMs ?? process.env.LC0_TIMEOUT_MS ?? 30000
+    ),
+    levels: [...levels],
+    defaultLevel,
+    weightsByLevel,
   };
 }
 
-function createState(config) {
+function createState(config, level, weightsPath) {
   return {
-    ...config,
+    binaryPath: config.binaryPath,
+    cwd: config.cwd,
+    nodes: config.nodes,
+    timeoutMs: config.timeoutMs,
+    level,
+    weightsPath,
     proc: null,
     stdoutBuffer: "",
     stderrBuffer: "",
@@ -155,7 +179,9 @@ async function startProcess(state) {
 
   const args = [];
   if (state.weightsPath) {
-    state.recentOutputLines.push(`starting with weights=${state.weightsPath}`);
+    state.recentOutputLines.push(
+      `starting level=${state.level} weights=${state.weightsPath}`
+    );
     args.push(`--weights=${state.weightsPath}`);
   }
 
@@ -176,11 +202,14 @@ async function startProcess(state) {
 
   state.proc.on("exit", (code, signal) => {
     state.ready = false;
+    state.proc = null;
     const recent = state.recentOutputLines.slice(-8).join(" | ");
     const details = recent ? `; recent_output=${recent}` : "";
     rejectAllWaiters(
       state,
-      new Error(`lc0 process exited (code=${code}, signal=${signal})${details}`)
+      new Error(
+        `lc0 process for level ${state.level} exited (code=${code}, signal=${signal})${details}`
+      )
     );
   });
 
@@ -235,22 +264,64 @@ async function closeLc0(state) {
 
 /**
  * @param {object} [options]
- * @returns {{ init: () => Promise<void>, getBestMove: (fen: string) => Promise<string>, close: () => Promise<void> }}
+ * @returns {{
+ *   init: () => Promise<void>,
+ *   getBestMove: (fen: string, level?: number | string) => Promise<string>,
+ *   resolveLevel: (level?: number | string) => number,
+ *   getAvailableLevels: () => number[],
+ *   getDefaultLevel: () => number,
+ *   close: () => Promise<void>
+ * }}
  */
 function createLc0Client(options = {}) {
-  const state = createState(buildLc0Config(options));
+  const config = buildLc0Config(options);
+  const statesByLevel = new Map(
+    config.levels.map((level) => [
+      level,
+      createState(config, level, config.weightsByLevel[level]),
+    ])
+  );
+
+  function resolveLevelOrThrow(level) {
+    const resolvedLevel = normalizeLevel(level, {
+      allowedLevels: config.levels,
+      defaultLevel: config.defaultLevel,
+    });
+
+    if (!statesByLevel.has(resolvedLevel)) {
+      const error = new Error(`No weights configured for level ${resolvedLevel}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return resolvedLevel;
+  }
 
   return {
-    init: () => initLc0(state),
-    getBestMove: (fen) => getBestMoveForState(state, fen),
-    close: () => closeLc0(state),
+    init: async () => {
+      await Promise.all([...statesByLevel.values()].map((state) => initLc0(state)));
+    },
+    getBestMove: async (fen, level) => {
+      const resolvedLevel = resolveLevelOrThrow(level);
+      return getBestMoveForState(statesByLevel.get(resolvedLevel), fen);
+    },
+    resolveLevel: (level) => resolveLevelOrThrow(level),
+    getAvailableLevels: () => [...config.levels],
+    getDefaultLevel: () => config.defaultLevel,
+    close: async () => {
+      await Promise.all([...statesByLevel.values()].map((state) => closeLc0(state)));
+    },
   };
 }
 
 module.exports = {
-  expandHomePath,
-  resolveDefaultCwd,
-  detectWeightsFile,
+  DEFAULT_MAIA_LEVELS,
+  DEFAULT_BINARY_PATH,
+  DEFAULT_CWD,
+  DEFAULT_WEIGHTS_DIR,
+  validatePositiveInteger,
+  normalizeLevel,
+  resolveWeightsPath,
   buildLc0Config,
   createLc0Client,
 };

@@ -3,10 +3,11 @@ services:
     build:
       context: .
       args:
-        MAIA_LEVEL: ${MAIA_LEVEL:-1100}
+        MAIA_DEFAULT_LEVEL: ${MAIA_DEFAULT_LEVEL:-1100}
     environment:
       PORT: 8787
+      MAIA_DEFAULT_LEVEL: ${MAIA_DEFAULT_LEVEL:-1100}
       LC0_NODES: ${LC0_NODES:-1}
       LC0_TIMEOUT_MS: ${LC0_TIMEOUT_MS:-30000}
     ports:
-      - "${PORT:-8787}:8787"
+      - "127.0.0.1:${PORT:-8787}:8787"

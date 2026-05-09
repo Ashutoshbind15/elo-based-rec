@@ -13,21 +13,28 @@ const client = createLc0Client();
 let server = null;
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    defaultLevel: client.getDefaultLevel(),
+    availableLevels: client.getAvailableLevels(),
+  });
 });
 
 app.post("/best-move", async (req, res) => {
   try {
     const { fen } = req.body || {};
+    const level = req.body?.level ?? req.query.level;
     if (!fen || typeof fen !== "string") {
       res.status(400).json({ error: "Missing or invalid `fen` string" });
       return;
     }
 
-    const bestMove = await client.getBestMove(fen.trim());
-    res.json({ bestMove });
+    const resolvedLevel = client.resolveLevel(level);
+    const bestMove = await client.getBestMove(fen.trim(), resolvedLevel);
+    res.json({ bestMove, level: resolvedLevel });
   } catch (error) {
-    res.status(500).json({ error: error.message || "Engine request failed" });
+    const statusCode = Number(error.statusCode) || 500;
+    res.status(statusCode).json({ error: error.message || "Engine request failed" });
   }
 });
 

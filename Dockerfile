@@ -35,7 +35,7 @@ FROM ubuntu:${UBUNTU_VERSION} AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_VERSION
-ARG MAIA_LEVEL=1100
+ARG MAIA_DEFAULT_LEVEL=1100
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -53,9 +53,11 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
 COPY --from=lc0-builder /opt/lc0 /opt/lc0
 
 RUN mkdir -p /opt/lc0/weights \
-  && curl -fsSL \
-    "https://github.com/CSSLab/maia-chess/releases/download/v1.0/maia-${MAIA_LEVEL}.pb.gz" \
-    -o "/opt/lc0/weights/maia-${MAIA_LEVEL}.pb.gz"
+  && for level in 1100 1200 1300 1400 1500 1600 1700 1800 1900; do \
+    curl -fsSL \
+      "https://github.com/CSSLab/maia-chess/releases/download/v1.0/maia-${level}.pb.gz" \
+      -o "/opt/lc0/weights/maia-${level}.pb.gz"; \
+  done
 
 WORKDIR /app
 
@@ -67,12 +69,13 @@ RUN corepack enable \
 COPY src ./src
 
 ENV NODE_ENV=production
-ENV MAIA_LEVEL=${MAIA_LEVEL}
+ENV MAIA_DEFAULT_LEVEL=${MAIA_DEFAULT_LEVEL}
 ENV PORT=8787
 ENV LC0_EAGER_INIT=true
 ENV LC0_BINARY=/opt/lc0/bin/lc0
 ENV LC0_CWD=/opt/lc0
-ENV LC0_WEIGHTS=/opt/lc0/weights/maia-${MAIA_LEVEL}.pb.gz
+ENV LC0_LEVELS=1100,1200,1300,1400,1500,1600,1700,1800,1900
+ENV LC0_WEIGHTS_DIR=/opt/lc0/weights
 ENV LC0_NODES=1
 ENV LC0_TIMEOUT_MS=30000
 ENV PATH=/opt/lc0/bin:/usr/local/bin:${PATH}
