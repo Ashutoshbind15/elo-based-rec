@@ -64,9 +64,13 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN corepack enable \
-  && pnpm install --frozen-lockfile --prod
+  && pnpm install --frozen-lockfile
 
+COPY tsconfig.json ./
 COPY src ./src
+
+RUN pnpm build \
+  && pnpm prune --prod
 
 ENV NODE_ENV=production
 ENV MAIA_DEFAULT_LEVEL=${MAIA_DEFAULT_LEVEL}
@@ -85,4 +89,4 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
-CMD ["node", "src/server.js"]
+CMD ["node", "dist/server.js"]

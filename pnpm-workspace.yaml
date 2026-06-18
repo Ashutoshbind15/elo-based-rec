@@ -1,6 +1,6 @@
 minimumReleaseAge: 7200
 saveExact: true
-strictDepBuilds: true
+# strictDepBuilds: true
 trustPolicy: no-downgrade
 trustPolicyExclude:
   - "semver@6.3.1"
